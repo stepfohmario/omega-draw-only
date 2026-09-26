@@ -2,67 +2,123 @@ import streamlit as st
 import pandas as pd
 import math
 
-st.set_page_config(page_title="OMEGA DRAW ONLY - Dixon-Cole", layout="wide")
-st.title("OMEGA SOVEREIGN - DRAW ONLY (Dixon-Cole 1997)")
+st.set_page_config(page_title="OMEGA DRAW ONLY PRO", page_icon="👑", layout="wide")
 
-st.sidebar.header("Dixon-Cole Tau")
-tau = st.sidebar.slider("Tau (draw correction)", 0.0, 0.3, 0.10, 0.01)
-st.sidebar.write("Standard value = 0.10 - 0.13 for low scores")
+st.markdown("""
+<style>
+.big-title {font-size:48px; font-weight:900; text-align:center; color:white;}
+.sub {text-align:center; color:#00FF88; font-weight:700;}
+</style>
+<div class='big-title'>👑 OMEGA SOVEREIGN - DRAW ONLY PRO</div>
+<div class='sub'>Dixon-Cole 1997 Tau Correction | CAT 09-13 Sure Draw</div>
+""", unsafe_allow_html=True)
 
-def dixon_cole_adjusted_probs(lam, mu, tau):
-    def poisson(k, l):
-        return (l**k * math.exp(-l)) / math.factorial(k)
+st.sidebar.header("⚙️ Dixon-Cole Settings")
+tau = st.sidebar.slider("Tau (draw dependence)", 0.0, 0.30, 0.10, 0.01)
+st.sidebar.caption("Standard 0.10 = England. 0.13 for low-scoring leagues. Dixon & Coles 1997.")
+st.sidebar.markdown("---")
+st.sidebar.info("CAT A = Lambda & Mu both 0.9 - 1.3 = SURE DRAW ZONE")
 
+def poisson(k, lam):
+    return (lam**k * math.exp(-lam)) / math.factorial(k)
+
+def dixon_cole_draw(lam, mu, tau):
+    # Dixon-Cole adjusted low scores
     p00 = poisson(0,lam)*poisson(0,mu)*(1 - lam*mu*tau)
     p11 = poisson(1,lam)*poisson(1,mu)*(1 - tau)
     p01 = poisson(0,lam)*poisson(1,mu)*(1 + mu*tau)
     p10 = poisson(1,lam)*poisson(0,mu)*(1 + lam*tau)
 
-    # All draws 0-0,1-1,2-2
+    # For Draw we use corrected 0-0 and 1-1 + normal 2-2
     p22 = poisson(2,lam)*poisson(2,mu)
-    p_draw = (p00 + p11 + p22) * 100
+    # Higher draws small
+    p33 = poisson(3,lam)*poisson(3,mu)
 
-    # Basic Poisson 0-0,1-1 approx for comparison
-    dc_prob = p_draw
+    total_draw = (p00 + p11 + p22 + p33) * 100
+    return max(0, round(p00*100,2)), max(0, round(p11*100,2)), max(0, round(total_draw,2))
 
-    return round(p00*100,2), round(p11*100,2), round(p_draw,2)
+st.markdown("### 📤 Upload Team Stats Excel")
+st.caption("Required columns: HomeTeam | HomeScored | HomeConceded | AwayTeam | AwayScored | AwayConceded")
+st.caption("Example: Man City | 1.8 | 0.9 | Arsenal | 1.4 | 1.1")
 
-st.markdown("### Upload Team Stats Excel")
-st.write("Columns needed: HomeTeam, HomeScored, HomeConceded, AwayTeam, AwayScored, AwayConceded")
-
-uploaded = st.file_uploader("Upload CSV/XLSX", type=["csv","xlsx"])
+uploaded = st.file_uploader("Drag & Drop CSV / XLSX (200MB max)", type=["csv","xlsx","xls"])
 
 if uploaded:
-    if uploaded.name.endswith("xlsx"):
-        df = pd.read_excel(uploaded)
-    else:
-        df = pd.read_csv(uploaded)
-
-    results = []
-    for _, r in df.iterrows():
-        try:
-            lam = (float(r['HomeScored']) + float(r['AwayConceded'])) / 2
-            mu = (float(r['AwayScored']) + float(r['HomeConceded'])) / 2
-        except:
-            lam = float(r.get('lambda', 1.2))
-            mu = float(r.get('mu', 1.0))
-
-        p00, p11, dc_total = dixon_cole_adjusted_probs(lam, mu, tau)
-
-        # CAT classification 09--13
-        if 0.9 <= lam <= 1.3 and 0.9 <= mu <= 1.3:
-            cat = "CAT A 09--13 SURE DRAW HIGH"
-        elif 0.8 <= lam <= 1.5 and 0.8 <= mu <= 1.5:
-            cat = "CAT B"
+    try:
+        if uploaded.name.endswith(".xlsx") or uploaded.name.endswith(".xls"):
+            df = pd.read_excel(uploaded)
         else:
-            cat = "OTHER"
+            df = pd.read_csv(uploaded)
 
-        results.append([r['HomeTeam'], r['AwayTeam'], round(lam,2), round(mu,2), p00, p11, dc_total, cat])
+        # Clean columns
+        df.columns = [c.strip() for c in df.columns]
 
-    out_df = pd.DataFrame(results, columns=["Home","Away","Lambda","Mu","P(0-0)%","P(1-1)%","DixonCole DRAW%","CATEGORY"])
-    out_df = out_df.sort_values("DixonCole DRAW%", ascending=False)
-    st.dataframe(out_df, use_container_width=True)
-    st.success(f"Processed {len(out_df)} games - Top Draw is {out_df.iloc[0]['Home']} vs {out_df.iloc[0]['Away']} = {out_df.iloc[0]['DixonCole DRAW%']}%")
+        results = []
+        for _, r in df.iterrows():
+            try:
+                # Calculate Lambda and Mu
+                hs = float(r['HomeScored'])
+                hc = float(r['HomeConceded'])
+                aws = float(r['AwayScored'])
+                awc = float(r['AwayConceded'])
+
+                lam = (hs + awc) / 2
+                mu = (aws + hc) / 2
+
+                p00, p11, dc_total = dixon_cole_draw(lam, mu, tau)
+
+                # OMEGA CAT SYSTEM 09--13
+                if 0.90 <= lam <= 1.30 and 0.90 <= mu <= 1.30:
+                    cat = "🔥 CAT A 09--13 SURE DRAW"
+                    score = 100
+                elif 0.80 <= lam <= 1.50 and 0.80 <= mu <= 1.50:
+                    cat = "⚠️ CAT B DRAW LEAN"
+                    score = 70
+                elif 0.70 <= lam <= 1.70 and 0.70 <= mu <= 1.70:
+                    cat = "CAT C"
+                    score = 40
+                else:
+                    cat = "NO DRAW"
+                    score = 10
+
+                results.append([
+                    str(r['HomeTeam']), str(r['AwayTeam']),
+                    round(lam,2), round(mu,2),
+                    p00, p11, dc_total,
+                    cat, score
+                ])
+            except Exception as e:
+                continue
+
+        out_df = pd.DataFrame(results, columns=["Home","Away","Lambda","Mu","P(0-0)%","P(1-1)%","DixonCole DRAW%","CATEGORY","Rank"])
+        out_df = out_df.sort_values(["Rank","DixonCole DRAW%"], ascending=[False, False])
+
+        # BANKER
+        if len(out_df) > 0:
+            banker = out_df.iloc[0]
+            st.success(f"🏦 BANKER OF THE DAY: {banker['Home']} vs {banker['Away']} | DRAW {banker['DixonCole DRAW%']}% | {banker['CATEGORY']} (Lambda {banker['Lambda']} / {banker['Mu']})")
+
+        st.dataframe(out_df, use_container_width=True, height=600)
+
+        # Download
+        csv = out_df.to_csv(index=False).encode('utf-8')
+        st.download_button("📥 Download Results CSV", csv, "omega_draw_results.csv", "text/csv")
+
+        st.metric("Total Games Analyzed", len(out_df))
+        st.metric("CAT A Found", len(out_df[out_df['CATEGORY'].str.contains("CAT A")]))
+
+    except Exception as err:
+        st.error(f"Error reading file: {err}")
+        st.write("Make sure columns are: HomeTeam, HomeScored, HomeConceded, AwayTeam, AwayScored, AwayConceded")
 else:
-    st.info("Upload your Omega sheet to calculate Dixon-Cole Draw %")
-    st.write("Example row: Man City, 1.8, 0.9, Arsenal, 1.4, 1.1")
+    st.info("👆 Upload your Omega Excel to calculate Dixon-Cole Draw % - Engine ready at tau=0.10")
+    st.markdown("""
+    **How it works:**
+    - Lambda = (Home Scored + Away Conceded)/2
+    - Mu = (Away Scored + Home Conceded)/2
+    - Dixon-Cole corrects 0-0 under-estimation by Poisson
+    - CAT A 09--13 = Both Lambda & Mu in 0.9-1.3 = Historic Sure Draw
+    """)
+
+st.markdown("---")
+st.caption("Built for Stephen | Omega Sovereign Engine | Dixon-Cole 1997")
